@@ -154,16 +154,28 @@ pub fn generate_faces(
 
     let offsets = vec![(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)];
 
-    for direction in faces {
-        for offset in &offsets {
-            commands.spawn((
-                Mesh3d(meshes.add(generate_face(direction, 100, offset.0, offset.1))),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color_texture: Some(asset.load("uv_check.png")),
-                    ..default()
-                })),
-            ));
-        }
+    commands
+        .spawn((Transform::default(), Visibility::default()))
+        .with_children(|com| {
+            for direction in faces {
+                for offset in &offsets {
+                    com.spawn((
+                        Mesh3d(meshes.add(generate_face(direction, 100, offset.0, offset.1))),
+                        MeshMaterial3d(materials.add(StandardMaterial {
+                            base_color_texture: Some(asset.load("uv_check.png")),
+                            ..default()
+                        })),
+                    ));
+                }
+            }
+        })
+        .observe(rotate_earth);
+}
+
+fn rotate_earth(drag: On<Pointer<Drag>>, mut transforms: Query<&mut Transform>) {
+    if let Ok(mut transform) = transforms.get_mut(drag.entity) {
+        transform.rotate_y(drag.delta.x * 0.02);
+        transform.rotate_x(drag.delta.y * 0.02);
     }
 }
 
