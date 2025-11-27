@@ -160,9 +160,17 @@ pub fn generate_faces(
             for direction in faces {
                 for offset in &offsets {
                     com.spawn((
-                        Mesh3d(meshes.add(generate_face(direction, 100, offset.0, offset.1))),
+                        Mesh3d(meshes.add(generate_face(direction, 800, offset.0, offset.1))),
                         MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color_texture: Some(asset.load("uv_check.png")),
+                            // Since the file is too large, so i add it to .gitignore
+                            // Here is the texture's link, where u can download from it.
+                            // https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74167/world.200410.3x21600x10800.png
+                            base_color_texture: Some(asset.load("world.png")),
+                            metallic_roughness_texture: Some(
+                                asset.load("specular_map_inverted_8k.png"),
+                            ),
+                            perceptual_roughness: 1.,
+                            normal_map_texture: Some(asset.load("height.png")),
                             ..default()
                         })),
                     ));
