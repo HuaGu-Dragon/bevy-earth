@@ -46,9 +46,7 @@ fn setup_camera(mut commands: Commands) {
     ));
 }
 
-fn rotate_light(time: Res<Time>, mut query: Query<&mut Transform, With<RotatingLight>>) {
-    let mut transform = query.single_mut().unwrap();
-
+fn rotate_light(time: Res<Time>, mut transform: Single<&mut Transform, With<RotatingLight>>) {
     // rotate around y-axis
     let rotation_speed = 0.5;
     let angle = time.elapsed_secs() * rotation_speed;
@@ -57,7 +55,7 @@ fn rotate_light(time: Res<Time>, mut query: Query<&mut Transform, With<RotatingL
     let z = angle.sin() * 2000.0;
 
     transform.translation = Vec3::new(x, 1000.0, z);
-    *transform = transform.looking_at(Vec3::ZERO, Vec3::Y);
+    *transform.into_inner() = transform.looking_at(Vec3::ZERO, Vec3::Y);
 }
 
 pub fn generate_face(normal: Vec3, resolution: u32, x_offset: f32, y_offset: f32) -> Mesh {
