@@ -160,7 +160,7 @@ pub fn generate_faces(
             for direction in faces {
                 for offset in &offsets {
                     com.spawn((
-                        Mesh3d(meshes.add(generate_face(direction, 800, offset.0, offset.1))),
+                        Mesh3d(meshes.add(generate_face(direction, 16, offset.0, offset.1))),
                         MeshMaterial3d(materials.add(StandardMaterial {
                             // Since the file is too large, so i add it to .gitignore
                             // Here is the texture's link, where u can download from it.
@@ -177,13 +177,22 @@ pub fn generate_faces(
                 }
             }
         })
-        .observe(rotate_earth);
+        .observe(rotate_earth)
+        .observe(zoom);
 }
 
 fn rotate_earth(drag: On<Pointer<Drag>>, mut transforms: Query<&mut Transform>) {
     if let Ok(mut transform) = transforms.get_mut(drag.entity) {
         transform.rotate_y(drag.delta.x * 0.02);
         transform.rotate_x(drag.delta.y * 0.02);
+    }
+}
+
+fn zoom(scroll: On<Pointer<Scroll>>, camera: Single<&mut Projection, With<Camera>>) {
+    if let Projection::Perspective(ref mut perspective) = *camera.into_inner() {
+        let delta_zoom = -scroll.y * 0.05;
+
+        perspective.fov = (perspective.fov + delta_zoom).clamp(0.05, PI / 4.);
     }
 }
 
