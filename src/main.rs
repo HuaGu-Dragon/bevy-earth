@@ -12,6 +12,8 @@ use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
 const EARTH_RADIUS: Vec3 = Vec3::new(1000., 1000., 1000.);
 
+const TOTAL_MESH_COUNT: u32 = 16;
+
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 enum GameState {
     #[default]
@@ -63,7 +65,7 @@ fn main() {
             display_loading_screen.run_if(in_state(GameState::Loading)),
         )
         .add_systems(Update, check_ready.run_if(in_state(GameState::Loading)))
-        .add_systems(Update, rotate_light)
+        .add_systems(Update, rotate_light.run_if(in_state(GameState::Playing)))
         .add_systems(OnEnter(GameState::Playing), generate_faces)
         .add_systems(
             OnEnter(GameState::Playing),
@@ -295,7 +297,12 @@ fn generate_faces(
             for direction in faces {
                 for offset in &offsets {
                     com.spawn((
-                        Mesh3d(meshes.add(generate_face(direction, 16, offset.0, offset.1))),
+                        Mesh3d(meshes.add(generate_face(
+                            direction,
+                            TOTAL_MESH_COUNT,
+                            offset.0,
+                            offset.1,
+                        ))),
                         MeshMaterial3d(materials.add(StandardMaterial {
                             base_color_texture: Some(textures.base_color.clone()),
                             metallic_roughness_texture: Some(textures.metallic_roughness.clone()),
