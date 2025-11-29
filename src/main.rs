@@ -131,23 +131,54 @@ fn check_ready(
     }
 }
 
-fn display_loading_screen(mut context: EguiContexts, progress: Res<LoadingProgress>) -> Result {
-    egui::Window::new("Loading...")
+fn display_loading_screen(
+    mut contexts: EguiContexts,
+    progress: Res<LoadingProgress>,
+    mut is_initialized: Local<bool>,
+) -> Result {
+    let ctx = contexts.ctx_mut()?;
+
+    if !*is_initialized {
+        *is_initialized = true;
+        egui_extras::install_image_loaders(ctx);
+    }
+
+    egui::Area::new("Left".into())
+        .anchor(egui::Align2::LEFT_BOTTOM, [0., 0.])
+        .show(ctx, |ui| {
+            ui.image(egui::include_image!("../assets/loading_left.gif"));
+        });
+
+    egui::Window::new("Loading")
         .anchor(egui::Align2::CENTER_CENTER, [0., 0.])
         .collapsible(false)
         .resizable(false)
         .title_bar(false)
-        .show(context.ctx_mut()?, |ui| {
+        .show(ctx, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(10.);
+
                 ui.heading("Loading...");
                 ui.add_space(20.);
 
                 let bar = egui::ProgressBar::new(progress.progress()).desired_width(300.);
-
                 ui.add(bar);
                 ui.add_space(10.);
-            })
+
+                if progress.texture < 3 {
+                    ui.label(format!("Loading textures ({}/3)", progress.texture));
+                } else {
+                    ui.label("Loading complete");
+                }
+
+                ui.add_space(10.);
+            });
+        });
+
+    egui::Area::new("Right".into())
+        .anchor(egui::Align2::RIGHT_BOTTOM, [0., 0.])
+        .show(ctx, |ui| {
+            ui.image(egui::include_image!("../assets/loading_right.gif"));
         });
     Ok(())
 }
