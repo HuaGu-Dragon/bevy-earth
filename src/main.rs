@@ -7,21 +7,68 @@ use bevy::{
     picking::prelude::*,
     prelude::*,
 };
-use bevy_inspector_egui::{bevy_egui::EguiPlugin, quick::WorldInspectorPlugin};
+use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
+use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
 const EARTH_RADIUS: Vec3 = Vec3::new(1000., 1000., 1000.);
+
+#[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+enum GameState {
+    #[default]
+    Loading,
+    Playing,
+}
+
+#[derive(Resource)]
+struct EarthTexture {
+    base_color: Handle<Image>,
+    metallic_roughness: Handle<Image>,
+    normal_map: Handle<Image>,
+}
+
+#[derive(Resource, Default)]
+struct LoadingProgress {
+    mesh: usize,
+    texture: usize,
+}
+
+impl LoadingProgress {
+    fn progress(&self) -> f32 {
+        self.texture as f32 / 3.
+    }
+
+    fn is_complete(&self) -> bool {
+        self.texture >= 3
+    }
+}
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(EguiPlugin::default())
-        .add_plugins(WorldInspectorPlugin::default().run_if(
-            bevy::input::common_conditions::input_toggle_active(true, KeyCode::Escape),
-        ))
+        .add_plugins(
+            WorldInspectorPlugin::default().run_if(
+                bevy::input::common_conditions::input_toggle_active(true, KeyCode::Escape)
+                    .and(in_state(GameState::Playing)),
+            ),
+        )
         .add_plugins((MeshPickingPlugin, DebugPickingPlugin))
-        .insert_resource(DebugPickingMode::Normal)
-        .add_systems(Startup, (setup_camera, generate_faces))
+        .insert_resource(DebugPickingMode::Disabled)
+        .init_state::<GameState>()
+        .init_resource::<LoadingProgress>()
+        .add_systems(Startup, load_texture)
+        .add_systems(Startup, setup_camera)
+        .add_systems(
+            EguiPrimaryContextPass,
+            display_loading_screen.run_if(in_state(GameState::Loading)),
+        )
+        .add_systems(Update, check_ready.run_if(in_state(GameState::Loading)))
         .add_systems(Update, rotate_light)
+        .add_systems(OnEnter(GameState::Playing), generate_faces)
+        .add_systems(
+            OnEnter(GameState::Playing),
+            |mut mode: ResMut<DebugPickingMode>| *mode = DebugPickingMode::Normal,
+        )
         .run();
 }
 
@@ -44,6 +91,65 @@ fn setup_camera(mut commands: Commands) {
         Transform::from_xyz(2000.0, 1000.0, 2000.0).looking_at(Vec3::ZERO, Vec3::Y),
         RotatingLight,
     ));
+}
+
+fn load_texture(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let texture = EarthTexture {
+        // Since the file is too large, so i add it to .gitignore
+        // Here is the texture's link, where u can download from it.
+        // https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74167/world.200410.3x21600x10800.png
+        base_color: asset_server.load("world.png"),
+        metallic_roughness: asset_server.load("specular_map_inverted_8k.png"),
+
+        normal_map: asset_server.load("height.png"),
+    };
+
+    commands.insert_resource(texture);
+}
+
+fn check_ready(
+    mut progress: ResMut<LoadingProgress>,
+    textures: Res<EarthTexture>,
+    asset_server: Res<AssetServer>,
+    mut next_state: ResMut<NextState<GameState>>,
+) {
+    let mut loaded = 0;
+    if asset_server.is_loaded_with_dependencies(&textures.base_color) {
+        loaded += 1;
+    }
+    if asset_server.is_loaded_with_dependencies(&textures.metallic_roughness) {
+        loaded += 1;
+    }
+    if asset_server.is_loaded_with_dependencies(&textures.normal_map) {
+        loaded += 1;
+    }
+
+    progress.texture = loaded;
+
+    if progress.is_complete() {
+        next_state.set(GameState::Playing);
+    }
+}
+
+fn display_loading_screen(mut context: EguiContexts, progress: Res<LoadingProgress>) -> Result {
+    egui::Window::new("Loading...")
+        .anchor(egui::Align2::CENTER_CENTER, [0., 0.])
+        .collapsible(false)
+        .resizable(false)
+        .title_bar(false)
+        .show(context.ctx_mut()?, |ui| {
+            ui.vertical_centered(|ui| {
+                ui.add_space(10.);
+                ui.heading("Loading...");
+                ui.add_space(20.);
+
+                let bar = egui::ProgressBar::new(progress.progress()).desired_width(300.);
+
+                ui.add(bar);
+                ui.add_space(10.);
+            })
+        });
+    Ok(())
 }
 
 fn rotate_light(time: Res<Time>, mut transform: Single<&mut Transform, With<RotatingLight>>) {
@@ -135,11 +241,11 @@ pub fn generate_face(normal: Vec3, resolution: u32, x_offset: f32, y_offset: f32
     mesh
 }
 
-pub fn generate_faces(
+fn generate_faces(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    asset: Res<AssetServer>,
+    textures: Res<EarthTexture>,
 ) {
     let faces = vec![
         Vec3::X,
@@ -160,15 +266,10 @@ pub fn generate_faces(
                     com.spawn((
                         Mesh3d(meshes.add(generate_face(direction, 16, offset.0, offset.1))),
                         MeshMaterial3d(materials.add(StandardMaterial {
-                            // Since the file is too large, so i add it to .gitignore
-                            // Here is the texture's link, where u can download from it.
-                            // https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74167/world.200410.3x21600x10800.png
-                            base_color_texture: Some(asset.load("world.png")),
-                            metallic_roughness_texture: Some(
-                                asset.load("specular_map_inverted_8k.png"),
-                            ),
+                            base_color_texture: Some(textures.base_color.clone()),
+                            metallic_roughness_texture: Some(textures.metallic_roughness.clone()),
                             perceptual_roughness: 1.,
-                            normal_map_texture: Some(asset.load("height.png")),
+                            normal_map_texture: Some(textures.normal_map.clone()),
                             ..default()
                         })),
                     ));
