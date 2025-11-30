@@ -45,11 +45,11 @@ struct BoxMaterialHandle(Handle<StandardMaterial>);
 
 impl LoadingProgress {
     fn progress(&self) -> f32 {
-        self.texture as f32 / 3.
+        (self.texture as f32 / 3.) * 0.7 + (self.mesh as f32 / 24.) * 0.3
     }
 
     fn is_complete(&self) -> bool {
-        self.texture >= 3
+        self.texture >= 3 && self.mesh >= 24
     }
 }
 
@@ -203,7 +203,9 @@ fn display_loading_screen(
                 ui.add(bar);
                 ui.add_space(10.);
 
-                if progress.texture < 3 {
+                if progress.mesh < 24 {
+                    ui.label(format!("Loading meshes ({}/{})", progress.mesh, 24));
+                } else if progress.texture < 3 {
                     ui.label(format!("Loading textures ({}/3)", progress.texture));
                 } else {
                     ui.label("Loading complete");
@@ -370,7 +372,11 @@ fn spawn_task(mut commands: Commands) {
     }
 }
 
-fn handle_tasks(mut commands: Commands, mut transform_tasks: Query<(Entity, &mut ComputeMesh)>) {
+fn handle_tasks(
+    mut commands: Commands,
+    mut transform_tasks: Query<(Entity, &mut ComputeMesh)>,
+    mut progress: ResMut<LoadingProgress>,
+) {
     for (entity, mut task) in &mut transform_tasks {
         // Use `check_ready` to efficiently poll the task without blocking the main thread.
         if let Some(mut commands_queue) = futures::check_ready(&mut task.0) {
@@ -378,6 +384,8 @@ fn handle_tasks(mut commands: Commands, mut transform_tasks: Query<(Entity, &mut
             commands.append(&mut commands_queue);
             // Task is complete, so remove the task component from the entity.
             commands.entity(entity).remove::<ComputeMesh>();
+
+            progress.mesh += 1;
         }
     }
 }
