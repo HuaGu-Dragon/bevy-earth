@@ -3,9 +3,11 @@ use std::f32::consts::PI;
 use bevy::{
     asset::RenderAssetUsages,
     dev_tools::picking_debug::{DebugPickingMode, DebugPickingPlugin},
+    ecs::{system::SystemState, world::CommandQueue},
     mesh::{self, PrimitiveTopology},
     picking::prelude::*,
     prelude::*,
+    tasks::{AsyncComputeTaskPool, Task, futures},
 };
 use bevy_egui::{EguiContexts, EguiPlugin, EguiPrimaryContextPass, egui};
 use bevy_inspector_egui::quick::WorldInspectorPlugin;
@@ -34,6 +36,12 @@ struct LoadingProgress {
     texture: usize,
 }
 
+#[derive(Component)]
+struct ComputeMesh(Task<CommandQueue>);
+
+#[derive(Resource, Deref)]
+struct BoxMaterialHandle(Handle<StandardMaterial>);
+
 impl LoadingProgress {
     fn progress(&self) -> f32 {
         self.texture as f32 / 3.
@@ -58,15 +66,15 @@ fn main() {
         .insert_resource(DebugPickingMode::Disabled)
         .init_state::<GameState>()
         .init_resource::<LoadingProgress>()
-        .add_systems(Startup, load_texture)
-        .add_systems(Startup, setup_camera)
+        .add_systems(Startup, add_assets)
+        .add_systems(Startup, (setup_camera, spawn_task))
         .add_systems(
             EguiPrimaryContextPass,
             display_loading_screen.run_if(in_state(GameState::Loading)),
         )
         .add_systems(Update, check_ready.run_if(in_state(GameState::Loading)))
         .add_systems(Update, rotate_light.run_if(in_state(GameState::Playing)))
-        .add_systems(OnEnter(GameState::Playing), generate_faces)
+        .add_systems(OnEnter(GameState::Playing), handle_tasks)
         .add_systems(
             OnEnter(GameState::Playing),
             |mut mode: ResMut<DebugPickingMode>| *mode = DebugPickingMode::Normal,
@@ -95,8 +103,12 @@ fn setup_camera(mut commands: Commands) {
     ));
 }
 
-fn load_texture(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let texture = EarthTexture {
+fn add_assets(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+) {
+    let textures = EarthTexture {
         // Since the file is too large, so i add it to .gitignore
         // Here is the texture's link, where u can download from it.
         // https://eoimages.gsfc.nasa.gov/images/imagerecords/74000/74167/world.200410.3x21600x10800.png
@@ -106,7 +118,16 @@ fn load_texture(mut commands: Commands, asset_server: Res<AssetServer>) {
         normal_map: asset_server.load("height.png"),
     };
 
-    commands.insert_resource(texture);
+    let box_material_handle = materials.add(StandardMaterial {
+        base_color_texture: Some(textures.base_color.clone()),
+        metallic_roughness_texture: Some(textures.metallic_roughness.clone()),
+        perceptual_roughness: 1.,
+        normal_map_texture: Some(textures.normal_map.clone()),
+        ..default()
+    });
+    commands.insert_resource(BoxMaterialHandle(box_material_handle));
+
+    commands.insert_resource(textures);
 }
 
 fn check_ready(
@@ -274,13 +295,8 @@ pub fn generate_face(normal: Vec3, resolution: u32, x_offset: f32, y_offset: f32
     mesh
 }
 
-fn generate_faces(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    textures: Res<EarthTexture>,
-) {
-    let faces = vec![
+fn spawn_task(mut commands: Commands) {
+    let faces = [
         Vec3::X,
         Vec3::NEG_X,
         Vec3::Y,
@@ -289,33 +305,59 @@ fn generate_faces(
         Vec3::NEG_Z,
     ];
 
-    let offsets = vec![(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)];
+    let offsets = [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)];
 
-    commands
+    let id = commands
         .spawn((Transform::default(), Visibility::default()))
-        .with_children(|com| {
-            for direction in faces {
-                for offset in &offsets {
-                    com.spawn((
-                        Mesh3d(meshes.add(generate_face(
-                            direction,
-                            TOTAL_MESH_COUNT,
-                            offset.0,
-                            offset.1,
-                        ))),
-                        MeshMaterial3d(materials.add(StandardMaterial {
-                            base_color_texture: Some(textures.base_color.clone()),
-                            metallic_roughness_texture: Some(textures.metallic_roughness.clone()),
-                            perceptual_roughness: 1.,
-                            normal_map_texture: Some(textures.normal_map.clone()),
-                            ..default()
-                        })),
-                    ));
-                }
-            }
-        })
         .observe(rotate_earth)
-        .observe(zoom);
+        .observe(zoom)
+        .id();
+
+    let thread_pool = AsyncComputeTaskPool::get();
+
+    for direction in faces {
+        for offset in offsets {
+            let entity = commands.spawn_empty().id();
+            commands.entity(id).add_child(entity);
+
+            let task = thread_pool.spawn(async move {
+                let mut command_queue = CommandQueue::default();
+
+                let face = generate_face(direction, TOTAL_MESH_COUNT, offset.0, offset.1);
+
+                command_queue.push(move |world: &mut World| {
+                    let (mesh, materal) = {
+                        let (mut mesh_handle, materal_handle) =
+                            SystemState::<(ResMut<Assets<Mesh>>, Res<BoxMaterialHandle>)>::new(
+                                world,
+                            )
+                            .get_mut(world);
+
+                        (mesh_handle.add(face), materal_handle.clone())
+                    };
+                    world
+                        .entity_mut(entity)
+                        .insert((Mesh3d(mesh), MeshMaterial3d(materal)));
+                });
+
+                command_queue
+            });
+
+            commands.entity(entity).insert(ComputeMesh(task));
+        }
+    }
+}
+
+fn handle_tasks(mut commands: Commands, mut transform_tasks: Query<(Entity, &mut ComputeMesh)>) {
+    for (entity, mut task) in &mut transform_tasks {
+        // Use `check_ready` to efficiently poll the task without blocking the main thread.
+        if let Some(mut commands_queue) = futures::check_ready(&mut task.0) {
+            // Append the returned command queue to execute it later.
+            commands.append(&mut commands_queue);
+            // Task is complete, so remove the task component from the entity.
+            commands.entity(entity).remove::<ComputeMesh>();
+        }
+    }
 }
 
 fn rotate_earth(drag: On<Pointer<Drag>>, mut transforms: Query<&mut Transform>) {
@@ -403,7 +445,6 @@ impl Coordinates {
         (u, v)
     }
 
-    #[allow(dead_code)]
     pub fn from_degrees(latitude: f32, longitude: f32) -> Result<Self, String> {
         if !(-90.0..=90.0).contains(&latitude) {
             return Err("Invalid latitude: {lat:?}".to_string());
