@@ -57,6 +57,7 @@ impl LoadingProgress {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .insert_resource(ClearColor(Color::srgb(0.1, 0.1, 0.15)))
         .add_plugins(EguiPlugin::default())
         .add_plugins(
             WorldInspectorPlugin::default().run_if(
@@ -176,6 +177,7 @@ fn display_loading_screen(
     mut contexts: EguiContexts,
     progress: Res<LoadingProgress>,
     mut is_initialized: Local<bool>,
+    mut frames_rendered: Local<u8>,
     state: Res<State<GameState>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) -> Result {
@@ -227,7 +229,10 @@ fn display_loading_screen(
         });
 
     if *state == GameState::PreLoading {
-        next_state.set(GameState::Loading);
+        *frames_rendered += 1;
+        if *frames_rendered >= 3 {
+            next_state.set(GameState::Loading);
+        }
     }
     Ok(())
 }
