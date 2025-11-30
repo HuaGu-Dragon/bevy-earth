@@ -14,7 +14,7 @@ use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
 const EARTH_RADIUS: Vec3 = Vec3::new(1000., 1000., 1000.);
 
-const TOTAL_MESH_COUNT: u32 = 16;
+const TOTAL_MESH_COUNT: u32 = 800;
 
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 enum GameState {
@@ -67,8 +67,7 @@ fn main() {
         .insert_resource(DebugPickingMode::Disabled)
         .init_state::<GameState>()
         .init_resource::<LoadingProgress>()
-        .add_systems(Startup, add_assets)
-        .add_systems(Startup, (setup_camera, spawn_task))
+        .add_systems(Startup, (add_assets, setup_camera, spawn_task))
         .add_systems(
             EguiPrimaryContextPass,
             display_loading_screen
