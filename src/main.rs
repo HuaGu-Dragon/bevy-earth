@@ -19,6 +19,7 @@ const TOTAL_MESH_COUNT: u32 = 800;
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 enum GameState {
     #[default]
+    PreLoading,
     Loading,
     PostLoading,
     Playing,
@@ -67,12 +68,15 @@ fn main() {
         .insert_resource(DebugPickingMode::Disabled)
         .init_state::<GameState>()
         .init_resource::<LoadingProgress>()
-        .add_systems(Startup, (add_assets, setup_camera, spawn_task))
+        .add_systems(Startup, setup_camera)
         .add_systems(
             EguiPrimaryContextPass,
-            display_loading_screen
-                .run_if(in_state(GameState::Loading).or(in_state(GameState::PostLoading))),
+            display_loading_screen.run_if(
+                in_state(GameState::Loading)
+                    .or(in_state(GameState::PostLoading).or(in_state(GameState::PreLoading))),
+            ),
         )
+        .add_systems(OnEnter(GameState::Loading), (add_assets, spawn_task))
         .add_systems(
             Update,
             (check_ready, handle_tasks).run_if(in_state(GameState::Loading)),
@@ -172,6 +176,8 @@ fn display_loading_screen(
     mut contexts: EguiContexts,
     progress: Res<LoadingProgress>,
     mut is_initialized: Local<bool>,
+    state: Res<State<GameState>>,
+    mut next_state: ResMut<NextState<GameState>>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
 
@@ -219,6 +225,10 @@ fn display_loading_screen(
         .show(ctx, |ui| {
             ui.image(egui::include_image!("../assets/loading_right.gif"));
         });
+
+    if *state == GameState::PreLoading {
+        next_state.set(GameState::Loading);
+    }
     Ok(())
 }
 
@@ -376,7 +386,17 @@ fn handle_tasks(
     mut transform_tasks: Query<(Entity, &mut ComputeMesh)>,
     mut progress: ResMut<LoadingProgress>,
 ) {
+    // Limit how many tasks we process per frame to avoid freezing the main thread
+    // when dealing with large meshes (e.g., TOTAL_MESH_COUNT = 800)
+    // const MAX_TASKS_PER_FRAME: usize = 1;
+    // let mut processed = 0;
+
     for (entity, mut task) in &mut transform_tasks {
+        // IMPORTANT: Check the limit BEFORE calling check_ready to avoid dropping CommandQueues
+        // if processed >= MAX_TASKS_PER_FRAME {
+        //     break; // Skip checking this task, leave it for next frame
+        // }
+
         // Use `check_ready` to efficiently poll the task without blocking the main thread.
         if let Some(mut commands_queue) = futures::check_ready(&mut task.0) {
             // Append the returned command queue to execute it later.
@@ -385,6 +405,7 @@ fn handle_tasks(
             commands.entity(entity).remove::<ComputeMesh>();
 
             progress.mesh += 1;
+            // processed += 1;
         }
     }
 }
