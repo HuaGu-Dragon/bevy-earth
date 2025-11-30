@@ -20,6 +20,7 @@ const TOTAL_MESH_COUNT: u32 = 16;
 enum GameState {
     #[default]
     Loading,
+    PostLoading,
     Playing,
 }
 
@@ -70,11 +71,22 @@ fn main() {
         .add_systems(Startup, (setup_camera, spawn_task))
         .add_systems(
             EguiPrimaryContextPass,
-            display_loading_screen.run_if(in_state(GameState::Loading)),
+            display_loading_screen
+                .run_if(in_state(GameState::Loading).or(in_state(GameState::PostLoading))),
         )
-        .add_systems(Update, check_ready.run_if(in_state(GameState::Loading)))
+        .add_systems(
+            Update,
+            (check_ready, handle_tasks).run_if(in_state(GameState::Loading)),
+        )
         .add_systems(Update, rotate_light.run_if(in_state(GameState::Playing)))
-        .add_systems(OnEnter(GameState::Playing), handle_tasks)
+        .add_systems(
+            OnEnter(GameState::PostLoading),
+            |mut next_state: ResMut<NextState<GameState>>,
+             earth: Single<&mut Visibility, With<Earth>>| {
+                next_state.set(GameState::Playing);
+                *earth.into_inner() = Visibility::Visible;
+            },
+        )
         .add_systems(
             OnEnter(GameState::Playing),
             |mut mode: ResMut<DebugPickingMode>| *mode = DebugPickingMode::Normal,
@@ -84,6 +96,9 @@ fn main() {
 
 #[derive(Component)]
 struct RotatingLight;
+
+#[derive(Component)]
+struct Earth;
 
 fn setup_camera(mut commands: Commands) {
     // Camera
@@ -150,7 +165,7 @@ fn check_ready(
     progress.texture = loaded;
 
     if progress.is_complete() {
-        next_state.set(GameState::Playing);
+        next_state.set(GameState::PostLoading);
     }
 }
 
@@ -308,7 +323,12 @@ fn spawn_task(mut commands: Commands) {
     let offsets = [(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)];
 
     let id = commands
-        .spawn((Transform::default(), Visibility::default()))
+        .spawn((
+            Transform::default(),
+            Visibility::Hidden,
+            Earth,
+            Name::new("Earth"),
+        ))
         .observe(rotate_earth)
         .observe(zoom)
         .id();
@@ -335,9 +355,11 @@ fn spawn_task(mut commands: Commands) {
 
                         (mesh_handle.add(face), materal_handle.clone())
                     };
-                    world
-                        .entity_mut(entity)
-                        .insert((Mesh3d(mesh), MeshMaterial3d(materal)));
+                    world.entity_mut(entity).insert((
+                        Mesh3d(mesh),
+                        MeshMaterial3d(materal),
+                        Visibility::Inherited,
+                    ));
                 });
 
                 command_queue
